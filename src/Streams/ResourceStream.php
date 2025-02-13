@@ -41,21 +41,37 @@ class ResourceStream implements StreamInterface
     public function read(int $length): string
     {
         if ($length <= 0) {
-            throw new \InvalidArgumentException('Cannot read zero ot negative count of bytes from a stream');
+            throw new \InvalidArgumentException('Cannot read zero or negative count of bytes from a stream');
         }
 
         if (!is_resource($this->stream)) {
             throw new StreamException('Stream is not writable');
         }
 
-        $result = fread($this->stream, $length);
+        // Set stream to non-blocking mode
+        stream_set_blocking($this->stream, false);
 
-        // Stream in blocking mode timed out
-        if(socket_get_status($this->stream)['timed_out']){
-            throw new StreamException('Stream timed out');
+        $read = [$this->stream];
+        $write = null;
+        $except = null;
+        
+        // Wait up to 5 seconds for data (5,000,000 microseconds)
+        $selectResult = stream_select($read, $write, $except, 5, 0);
+        
+        if ($selectResult === false) {
+            throw new StreamException('Stream select error occurred');
+        }
+        
+        if ($selectResult === 0) {
+            throw new StreamException('Stream timed out after 5 seconds');
         }
 
-        if (false === $result) {
+        // Set back to blocking mode for actual read
+        stream_set_blocking($this->stream, true);
+        
+        $result = stream_get_contents($this->stream, $length);
+
+        if ($result === false) {
             throw new StreamException("Error reading $length bytes");
         }
 
