@@ -24,12 +24,35 @@ class ResourceStream implements StreamInterface
      */
     public function __construct($stream)
     {
-        if (!is_resource($stream)) {
-            throw new \InvalidArgumentException(sprintf('Argument must be a valid resource type. %s given.', gettype($stream)));
+        if (!$this->isValidStream($stream)) {
+            throw new \InvalidArgumentException(sprintf('Argument must be a valid stream resource. %s given.', gettype($stream)));
         }
 
         // TODO: Should we verify the resource type?
         $this->stream = $stream;
+    }
+
+    /**
+     * Check if the given value is a valid stream (resource or object)
+     *
+     * @param mixed $stream
+     * @return bool
+     */
+    private function isValidStream($stream): bool
+    {
+        // PHP 8.0+ streams are objects, not resources
+        if (is_resource($stream)) {
+            return true;
+        }
+        
+        // Check for stream wrapper objects in PHP 8.0+
+        if (is_object($stream)) {
+            $className = get_class($stream);
+            // Socket, OpenSSLSocket, and other stream wrapper objects
+            return in_array($className, ['Socket', 'OpenSSLSocket', 'Shmop', 'SysvMessageQueue', 'SysvSemaphore', 'SysvSharedMemory'], true);
+        }
+        
+        return false;
     }
 
     /**
@@ -44,14 +67,15 @@ class ResourceStream implements StreamInterface
             throw new \InvalidArgumentException('Cannot read zero ot negative count of bytes from a stream');
         }
 
-        if (!is_resource($this->stream)) {
-            throw new StreamException('Stream is not writable');
+        if (!$this->isValidStream($this->stream)) {
+            throw new StreamException('Stream is not readable');
         }
 
         $result = fread($this->stream, $length);
 
-        // Stream in blocking mode timed out
-        if(socket_get_status($this->stream)['timed_out']){
+        // Stream in blocking mode timed out - use stream_get_meta_data instead of deprecated socket_get_status
+        $metadata = stream_get_meta_data($this->stream);
+        if ($metadata['timed_out'] ?? false) {
             throw new StreamException('Stream timed out');
         }
 
@@ -73,7 +97,7 @@ class ResourceStream implements StreamInterface
             $length = strlen($string);
         }
 
-        if (!is_resource($this->stream)) {
+        if (!$this->isValidStream($this->stream)) {
             throw new StreamException('Stream is not writable');
         }
 
