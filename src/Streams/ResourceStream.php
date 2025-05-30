@@ -38,40 +38,24 @@ class ResourceStream implements StreamInterface
      * @throws \RouterOS\Exceptions\StreamException when length parameter is invalid
      * @throws \InvalidArgumentException when the stream have been totally read and read method is called again
      */
-public function read(int $length): string
+    public function read(int $length): string
     {
         if ($length <= 0) {
-            throw new \InvalidArgumentException('Cannot read zero or negative count of bytes from a stream');
+            throw new \InvalidArgumentException('Cannot read zero ot negative count of bytes from a stream');
         }
 
         if (!is_resource($this->stream)) {
             throw new StreamException('Stream is not writable');
         }
 
-        // Set stream to non-blocking mode
-        stream_set_blocking($this->stream, false);
+        $result = fread($this->stream, $length);
 
-        $read = [$this->stream];
-        $write = null;
-        $except = null;
-
-        // Wait up to 5 seconds for data (5,000,000 microseconds)
-        $selectResult = stream_select($read, $write, $except, 5, 0);
-
-        if ($selectResult === false) {
-            throw new StreamException('Stream select error occurred');
+        // Stream in blocking mode timed out
+        if(socket_get_status($this->stream)['timed_out']){
+            throw new StreamException('Stream timed out');
         }
 
-        if ($selectResult === 0) {
-            throw new StreamException('Stream timed out after 5 seconds');
-        }
-
-        // Set back to blocking mode for actual read
-        stream_set_blocking($this->stream, true);
-
-        $result = stream_get_contents($this->stream, $length);
-
-        if ($result === false) {
+        if (false === $result) {
             throw new StreamException("Error reading $length bytes");
         }
 
