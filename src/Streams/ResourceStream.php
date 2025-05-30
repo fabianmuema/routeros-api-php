@@ -24,35 +24,12 @@ class ResourceStream implements StreamInterface
      */
     public function __construct($stream)
     {
-        if (!$this->isValidStream($stream)) {
-            throw new \InvalidArgumentException(sprintf('Argument must be a valid stream resource. %s given.', gettype($stream)));
+        if (!is_resource($stream)) {
+            throw new \InvalidArgumentException(sprintf('Argument must be a valid resource type. %s given.', gettype($stream)));
         }
 
         // TODO: Should we verify the resource type?
         $this->stream = $stream;
-    }
-
-    /**
-     * Check if the given value is a valid stream (resource or object)
-     *
-     * @param mixed $stream
-     * @return bool
-     */
-    private function isValidStream($stream): bool
-    {
-        // PHP 8.0+ streams are objects, not resources
-        if (is_resource($stream)) {
-            return true;
-        }
-        
-        // Check for stream wrapper objects in PHP 8.0+
-        if (is_object($stream)) {
-            $className = get_class($stream);
-            // Socket, OpenSSLSocket, and other stream wrapper objects
-            return in_array($className, ['Socket', 'OpenSSLSocket', 'Shmop', 'SysvMessageQueue', 'SysvSemaphore', 'SysvSharedMemory'], true);
-        }
-        
-        return false;
     }
 
     /**
@@ -61,29 +38,52 @@ class ResourceStream implements StreamInterface
      * @throws \RouterOS\Exceptions\StreamException when length parameter is invalid
      * @throws \InvalidArgumentException when the stream have been totally read and read method is called again
      */
-    public function read(int $length): string
-    {
-        if ($length <= 0) {
-            throw new \InvalidArgumentException('Cannot read zero ot negative count of bytes from a stream');
+    public function read(int $length): string {
+        $data = '';
+        $received = 0;
+        
+        // Set socket to non-blocking
+        stream_set_blocking($this->stream, false);
+        
+        $startTime = microtime(true);
+        
+        while ($received < $length) {
+            // Check timeout
+            if ((microtime(true) - $startTime) > 60) {
+                throw new StreamException("Read timeout after {$received}/{$length} bytes");
+            }
+            
+            // Wait for data
+            $read = [$this->stream];
+            $write = $except = null;
+            $ready = @stream_select($read, $write, $except, 1);
+            
+            if ($ready === false) {
+                throw new StreamException("stream_select failed");
+            } elseif ($ready === 0) {
+                continue; // Timeout, check again
+            }
+            
+            // Use stream_socket_recvfrom for better performance
+            $chunk = @stream_socket_recvfrom($this->stream, $length - $received);
+            
+            if ($chunk === false) {
+                $error = error_get_last();
+                throw new StreamException("Read failed: " . $error['message']);
+            } elseif ($chunk === '') {
+                // Check if connection closed
+                if (feof($this->stream)) {
+                    throw new StreamException("Connection closed by RouterOS");
+                }
+                usleep(1000); // 1ms delay
+                continue;
+            }
+            
+            $data .= $chunk;
+            $received += strlen($chunk);
         }
-
-        if (!$this->isValidStream($this->stream)) {
-            throw new StreamException('Stream is not readable');
-        }
-
-        $result = fread($this->stream, $length);
-
-        // Stream in blocking mode timed out - use stream_get_meta_data instead of deprecated socket_get_status
-        $metadata = stream_get_meta_data($this->stream);
-        if ($metadata['timed_out'] ?? false) {
-            throw new StreamException('Stream timed out');
-        }
-
-        if (false === $result) {
-            throw new StreamException("Error reading $length bytes");
-        }
-
-        return $result;
+        
+        return $data;
     }
 
     /**
@@ -97,7 +97,7 @@ class ResourceStream implements StreamInterface
             $length = strlen($string);
         }
 
-        if (!$this->isValidStream($this->stream)) {
+        if (!is_resource($this->stream)) {
             throw new StreamException('Stream is not writable');
         }
 
