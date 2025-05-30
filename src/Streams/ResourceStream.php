@@ -55,15 +55,15 @@ class ResourceStream implements StreamInterface
         $write = null;
         $except = null;
 
-        // Wait up to 10 seconds for data (10,000,000 microseconds)
-        $selectResult = stream_select($read, $write, $except, 10, 0);
+        // Wait up to 5 seconds for data (10,000,000 microseconds)
+        $selectResult = stream_select($read, $write, $except, 5, 0);
 
         if ($selectResult === false) {
             throw new StreamException('Stream select error occurred');
         }
 
         if ($selectResult === 0) {
-            throw new StreamException('Stream timed out after 10 seconds');
+            throw new StreamException('Stream timed out after 5 seconds');
         }
 
         // Set back to blocking mode for actual read
